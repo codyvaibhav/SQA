@@ -1,0 +1,57 @@
+The stack you need (all free, runs on Windows)
+
+Python — the engine that connects everything
+watchdog — monitors your shared folder; fires when any .xlsx file is saved
+pandas + openpyxl — reads Excel, does the same transformations your dashboards do
+Plotly Dash — recreates your Excel charts as a live web app, auto-refreshes every few seconds
+Windows Task Scheduler — starts the Python server automatically when the PC boots
+
+
+How it works, step by step
+
+Someone saves/updates an Excel file in the shared network folder
+watchdog detects the save event within seconds
+Python reads the new data with pandas, processes it exactly as your Excel formulas do
+The Dash web app updates its charts in memory
+Everyone on the office WiFi/LAN opens http://192.168.x.x:8050 in any browser — they see live, updated dashboards, no Excel needed
+
+
+What your team needs
+WhoWhat they doYou (setup, once)Install Python, write the script, run it on the office PCTeammatesJust open a browser — nothing to install
+
+Want me to generate the actual Python code?
+If you share:
+
+A sample of your Excel file structure (sheet names, column names)
+What your current dashboards show (bar charts, line charts, KPIs, etc.)
+
+I'll write the complete ready-to-run Python script — file watcher + data processing + Dash dashboard — tailored to your exact data.
+
+
+MACROS
+
+
+00:39
+Claude responded: Yes, absolutely — VBA macros are a great fit here since you already know Excel.
+Yes, absolutely — VBA macros are a great fit here since you already know Excel. Here's how this approach compares and how to make it work:
+
+How it would work with VBA
+
+New Excel file arrives in the shared folder
+A "master" Excel workbook runs a VBA macro that opens the new file, pulls the data, refreshes all your dashboard charts/pivots, and saves the output
+The dashboard workbook is always up to date — team opens it directly from the shared drive
+Two ways to trigger the macro automatically
+
+Option A — Windows Task Scheduler (simplest) Schedule the master workbook to open at set intervals (e.g. every 15 min or hourly). The Workbook_Open event fires the macro automatically. No Python needed at all.
+
+Option B — VBA file watcher loop A VBA timer loop inside the master workbook checks if a new/modified file exists in the folder using Dir() and FileDateTime(). When it detects a change, it triggers the dashboard refresh macro immediately.
+
+What I need from you to write the code
+
+To generate the actual ready-to-run VBA, just tell me:
+
+What does the incoming Excel file look like? (sheet name, key columns — e.g. "Sheet1 has Date, Region, Sales, Units")
+What does your dashboard show? (pivot tables, bar/line charts, KPI cells, etc.)
+Should it overwrite one master dashboard file, or create a new dated output each time?
+Do you prefer scheduled trigger (every X minutes) or instant detection when the file arrives?
+Once I know this, I'll write the complete VBA module — the file detection, data pull, and dashboard refresh — ready to paste into your Excel workbook.
