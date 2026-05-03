@@ -1,0 +1,50 @@
+so you are saying my team open excel file in a shared folder and they get to see dashboards
+
+01:24
+Claude responded: Yes exactly!
+Yes exactly! But let me give you the full picture with the catch:
+
+How It Works
+You update the Excel file daily
+          ↓
+Save it to Shared Network Folder
+(\\192.168.1.XX\Dashboards)
+          ↓
+Team opens file from that same folder
+          ↓
+They see your dashboard with slicers & charts ✅
+The One Big Catch — Simultaneous Editing
+Situation	What Happens
+One person opens at a time	✅ Works perfectly
+Multiple people open together	⚠️ Excel locks the file
+Someone else is editing	❌ Others get "Read Only" mode
+The Fix — Mark it Read Only for Team
+Since your team only needs to view and filter (not edit), do this:
+
+File → Info → Protect Workbook → Mark as Final
+
+Or simpler — just tell them:
+
+"When Excel asks 'Open as Read Only?' — click Yes"
+
+This way everyone can open simultaneously with no conflicts, and your slicers/filters still work for each person individually.
+
+What Your Team Experience Looks Like
+Team member opens shared folder in File Explorer
+          ↓
+Double clicks Dashboard.xlsm
+          ↓
+Clicks "Enable Macros" (one time warning)
+          ↓
+Sees your full dashboard with slicers & charts
+Filters by model, date, whatever you built
+          ↓
+They CANNOT accidentally edit or break anything ✅
+The Only Remaining Question
+Do you have a shared network folder already?
+
+If yes → you're basically ready to go today
+If no → ask your IT or manager: "Can I get a shared folder on the LAN for my team?" — this is a very standard, zero-risk request they will likely approve immediately
+That's genuinely it. No server, no Python, no Power BI — just a shared folder and your Excel file.
+
+Want help setting up the folder path inside VBA so the file auto-saves to the shared location after you refresh it?
