@@ -57,3 +57,62 @@ if st.session_state.get("do_rerun", False):
     st.session_state.do_rerun = False
     st.rerun()  # 👈 rerun happens OUTSIDE the button block
 
+
+claude:
+
+can see the full code now. There are two problems causing the reset not working:
+Problem 1: @st.cache_data on get_data() means df is cached — but startDate/endDate are computed from df["Service Date"] which is modified after the cache. This is fine, but the real issue is:
+Problem 2: You’re still using the old pattern (start_date_value key vs start_date_input widget key conflict) + no st.rerun().
+Here’s the fixed date section to replace in your code:
+
+df["Service Date"] = df["Service Date"].astype(str).str.zfill(6)
+df["Service Date"] = pd.to_datetime(df["Service Date"], format='%y%m%d', errors='coerce')
+df["Svc Date"] = df["Service Date"].dt.strftime('%d/%m/%Y')
+
+# Remove this line — it's redundant and causes issues:
+# df["Service Date (datetime)"] = pd.to_datetime(df["Service Date"], format='%d/%m/%Y')
+
+startDate = df["Service Date"].min()
+endDate = df["Service Date"].max()
+
+# ✅ Init using widget keys directly
+if 'start_date_input' not in st.session_state:
+    st.session_state.start_date_input = startDate.date()
+if 'end_date_input' not in st.session_state:
+    st.session_state.end_date_input = endDate.date()
+
+# ✅ Flag-based rerun (reset can live anywhere)
+if st.session_state.get("do_rerun", False):
+    st.session_state.do_rerun = False
+    st.rerun()
+
+col1, col2, col3, col4 = st.columns([1, 1, 1, 3])
+
+with col1:
+    st.date_input("Start Date", key='start_date_input')  # no value= param
+
+with col2:
+    st.date_input("End Date", key='end_date_input')  # no value= param
+
+with col3:
+    if st.button("Reset Dates"):
+        st.session_state.start_date_input = startDate.date()
+        st.session_state.end_date_input = endDate.date()
+        st.session_state.do_rerun = True  # triggers rerun above on next pass
+
+# ✅ Read from widget keys directly
+start_date_ts = pd.Timestamp(st.session_state.start_date_input)
+end_date_ts = pd.Timestamp(st.session_state.end_date_input)
+
+dfSelection = df[
+    (df["Service Date"] >= start_date_ts) &
+    (df["Service Date"] <= end_date_ts)
+]
+
+
+# Change this line at the bottom:
+st.write(dfSelection[[
+    'Marketing Name', 'Svc Date',  # ← use Svc Date, not Service Date
+    ...
+]])
+
