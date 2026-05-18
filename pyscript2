@@ -1,0 +1,553 @@
+import pandas as pd
+import numpy as np
+import streamlit
+import xlwings as xw
+import plotly_express as px
+import streamlit as st
+from datetime import datetime
+import os
+import openpyxl
+
+current_theme = st.get_option("theme.backgroundColor")
+if current_theme == "#ffffff":  # Light mode
+    text_color = "#ffffff"  # Black
+else:  # Dark mode
+    text_color = "#000000"
+
+with open("style.css") as f:
+    st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+
+st.title("Field Model Monitoring Dashboard")
+st.set_page_config(page_title="S26U Dashboard",page_icon=":bar_chart:",layout="wide")
+
+c1,c2,c3 = st.columns([1,1.6,1])
+with c1:
+    fl = st.file_uploader(":file_folder: Upload data", type=(["csv","txt","xlsx","xls"]))
+    if fl is not None:
+        # Read uploaded file
+        filename = fl.name
+#     st.write(filename)
+#     if filename.endswith('.csv'):
+#         df = pd.read_csv(fl, encoding='ISO-8859-1')
+#     elif filename.endswith(('.xlsx', '.xls')):
+#         df = pd.read_excel(fl)
+# else:
+#     # Default file paths if no upload
+#     file_path = r"C:\Users\v.garg\Desktop\S26U data\s26raw.xlsx"
+#     asrdata_path = r"C:\Users\v.garg\Desktop\S26U data\Service_compare_56days.xlsx"
+#     msclist_path = r"C:\Users\v.garg\Desktop\S26U data\MSC_list.xlsx"
+
+with c3:
+    st.write(":timer_clock: Last Updated on", "")
+    st.write(datetime.now().replace(microsecond=0))
+    # st.write(datetime.now())
+
+file_path = r"C:\Users\v.garg\Desktop\S26U data\s26raw.xlsx"
+asrdata_path = r"C:\Users\v.garg\Desktop\S26U data\Service_compare_56days.xlsx"
+msclist_path = r"C:\Users\v.garg\Desktop\S26U data\MSC_list.xlsx"
+
+@st.cache_data
+def get_data():
+    df = pd.read_excel(file_path, skiprows=8)
+    df.columns = df.columns.str.replace('\n', ' ')
+    df = df.replace("착하판정", "Return")
+    df['ASC Code'] = df['ASC Code'].replace([np.inf, -np.inf], 0)  # Replace inf with 0
+    df['ASC Code'] = df['ASC Code'].fillna(0)  # Replace NaN with 0
+    df['ASC Code'] = df['ASC Code'].astype(int) #float64 -> int64
+    return df
+df = get_data()
+
+@st.cache_data
+def get_msclist():
+    df3 = msc_list = pd.read_excel(msclist_path)
+    return df3
+df3 = get_msclist()
+
+df = pd.merge(df3, df, on="ASC Code", how="right")
+
+@st.cache_data
+def get_asrdata():
+    df2 = pd.read_excel(asrdata_path, skiprows=9)
+    df2.columns = df2.columns.str.replace('\n', ' ')
+    df2.columns = ["Days", "S26U_O_Acc. Service", "S26U_O_Sell Out", "S25U_O_Acc. Service", "S25U_O_Sell Out"]
+    df2.loc[0, "S26U_O_Sell Out"] = 20000
+    df2["Day"] = range(1, len(df2) + 1)
+    df2["S26U_O_Ratio"] = round(df2["S26U_O_Acc. Service"] / df2["S26U_O_Sell Out"] * 100, 2)
+    df2["S25U_O_Ratio"] = round(df2["S25U_O_Acc. Service"] / df2["S25U_O_Sell Out"] * 100, 2)
+    return df2
+df2 = get_asrdata()
+
+#Key Displays
+model = df["Marketing Name"].unique()
+total_calls = str(len(df))
+launch_date = "3 Mar' 26"
+
+l, m, r = st.columns(3)
+with l:
+    st.subheader("Model:")
+    st.write(", ".join(model))
+with m:
+    st.subheader("Launch Date:")
+    st.write(launch_date)
+with r:
+    st.subheader("Total Calls:")
+    st.write(total_calls)
+
+st.markdown("---")
+
+#-------------------------------------
+
+df["Service Date"] = df["Service Date"].astype(str).str.zfill(6)
+df["Service Date"] = pd.to_datetime(df["Service Date"], format='%y%m%d', errors='coerce')
+df["Service Date (datetime)"] = pd.to_datetime(df["Service Date"], format='%d/%m/%Y')
+df["Svc Date"] = df["Service Date"].dt.strftime('%d/%m/%Y')
+
+startDate = df["Service Date"].min()
+endDate = df["Service Date"].max()
+
+col1, col2, col3, col4 = st.columns([1,1,1,3])
+
+if 'start_date_value' not in st.session_state:
+    st.session_state.start_date_value = startDate.date()
+if 'end_date_value' not in st.session_state:
+    st.session_state.end_date_value = endDate.date()
+
+# Date inputs bound to session state
+with col1:
+    st.session_state.start_date_value = st.date_input(
+        "Start Date",
+        value=st.session_state.start_date_value,
+        key='start_date_input'
+    )
+
+with col2:
+    st.session_state.end_date_value = st.date_input(
+        "End Date",
+        value=st.session_state.end_date_value,
+        key='end_date_input'
+    )
+
+# Reset button updates session state values
+with col3:
+    if st.button("Reset Dates"):
+        st.session_state.start_date_value = startDate.date()
+        st.session_state.end_date_value = endDate.date()
+        st.success("Dates have been reset!")
+
+# Convert selected dates to Timestamp for filtering
+start_date_ts = pd.Timestamp(st.session_state.start_date_value)
+end_date_ts = pd.Timestamp(st.session_state.end_date_value)
+
+# Filter DataFrame
+dfSelection = df[
+    (df["Service Date"] >= start_date_ts) &
+    (df["Service Date"] <= end_date_ts)
+]
+
+
+with col4:
+    handlingType = st.multiselect(
+        "Select Handling Type:",
+        options=dfSelection["Handling Type"].unique(),
+        default=dfSelection["Handling Type"].unique()
+    )
+dfSelection = dfSelection[dfSelection["Handling Type"].isin(handlingType)]
+
+#-------------------------------------
+
+# Toggle button for comparison graph
+show_comparison = st.checkbox("Show Comparison Graph", value=False)
+
+# Create graphs based on toggle state
+l,m = st.columns(2)
+with l:
+    if show_comparison:
+        # Comparison graph
+        comparison_chart = px.line(
+            #df2[(df2["Service Date"] >= date1) & (df2["Service Date"] <= date2)],
+            df2,
+            x="Day",
+            y=["S26U_O_Ratio", "S25U_O_Ratio"],
+            title="Comparison",
+            labels={"value": "Ratio", "Day": "Day"},
+            color_discrete_sequence=["blue", "red"]
+        )
+        comparison_chart.update_traces(
+            name="S26U"
+        )
+        comparison_chart.data[1].name = "S25U"
+        comparison_chart.update_layout(
+            xaxis=dict(showgrid=False,showline=False),
+            yaxis=dict(showgrid=False),
+            legend_title_text="" , # Remove the legend title (e.g., 'variable')
+            plot_bgcolor="#E8EDF2",
+            xaxis_tickfont_family = "Arial",
+            xaxis_tickfont_size = 12,
+            xaxis_tickfont_color = "black",
+            yaxis_tickfont_family="Arial",
+            yaxis_tickfont_size=12,
+            yaxis_tickfont_color="black",
+        )
+        st.plotly_chart(comparison_chart)
+    else:
+        # S26U_O_Ratio graph
+        s26u_chart = px.line(
+            #df2[(df2["Service Date"] >= date1) & (df2["Service Date"] <= date2)],
+            df2,
+            x="Day",
+            y="S26U_O_Ratio",
+            title="Defect Rate",
+            labels={"S26U_O_Ratio": "Ratio", "Day": "Day"}
+        )
+        s26u_chart.update_layout(
+            xaxis=dict(showgrid=False,showline=False),
+            yaxis=dict(showgrid=False),
+            plot_bgcolor="#E8EDF2",
+            xaxis_tickfont_family="Arial",
+            xaxis_tickfont_size=12,
+            xaxis_tickfont_color="black",
+            yaxis_tickfont_family="Arial",
+            yaxis_tickfont_size=12,
+            yaxis_tickfont_color="black",
+        )
+        st.plotly_chart(s26u_chart)
+with m:
+    pie_chart = px.pie(
+        dfSelection,
+        names="Handling Type",
+        title="Handling Type Distribution",
+        color_discrete_sequence=px.colors.qualitative.Pastel,  # Color scheme
+    )
+    pie_chart.update_layout(
+        paper_bgcolor='#E8EDF2',
+    )
+
+    st.plotly_chart(pie_chart)
+
+#-------------------------------------
+
+l,m = st.columns(2)
+with l:
+    symptomGroup1 = st.multiselect(
+        "Select Symptom:",
+        options=dfSelection["Symptom Group 1"].unique(),
+        # default=["Camera", "Display", "Power", "Call audio/Sound", "Charging"],
+        default=dfSelection["Symptom Group 1"].unique(),
+    )
+    dfSelection = dfSelection[dfSelection["Symptom Group 1"].isin(symptomGroup1)]
+
+    symptomWiseCalls = dfSelection.groupby(by=["Symptom Group 1"]).size().reset_index(name="Count").sort_values(by="Count", ascending=False)
+    n = min(5,len(symptomGroup1))
+    top_n = symptomWiseCalls.head(n)
+
+    colors = [
+        "red", "green", "blue", "yellow", "purple", "orange", "pink", "brown", "violet", "grey",
+        "teal", "cyan", "magenta", "lime", "maroon", "navy", "olive", "aqua", "fuchsia", "indigo",
+        "silver", "gold", "coral", "lavender", "turquoise"
+    ]
+    dynamic_colors = colors[:len(top_n)]
+
+    total_count = symptomWiseCalls["Count"].sum()
+
+    top_n["Percentage"] = (top_n["Count"] / total_count) * 100
+
+    # Format percentages with % symbol and x prefix
+    top_n["PercentageLabel"] = top_n["Percentage"].apply(lambda x: f"{int(x)}%")
+
+    # Create a bar chart using Plotly
+    fig = px.bar(
+        top_n,
+        x="Symptom Group 1",
+        y="Count",
+        orientation="v",
+        title = "<b>Top 5 Symptoms</b>" if n == 5 else "<b>Top Symptoms</b>",
+        color=dynamic_colors,
+        template="plotly_white",
+        text=top_n["PercentageLabel"],  # Display x% on bars
+    )
+
+    # Update text font using fig.update_traces
+    fig.update_traces(
+        textfont=dict(size=14)  # Customize text font
+    )
+
+    fig.update_layout(
+        showlegend = False,
+        xaxis_title=None,
+        yaxis_title=None,
+        plot_bgcolor="#E8EDF2",
+        xaxis=dict(showgrid=False),
+        yaxis=dict(showgrid=False,showticklabels=False),
+        autosize=True,
+        xaxis_tickfont_family="Arial",
+        xaxis_tickfont_size=12,
+        # xaxis_tickfont_color="black",
+        yaxis_tickfont_family="Arial",
+        yaxis_tickfont_size=12,
+        # yaxis_tickfont_color="black",
+    )
+    st.plotly_chart(fig)
+with m:
+    repairDescription = st.multiselect(
+        "Select Repair Part:",
+        options=dfSelection["Repair Description"].unique(),
+        # default=["Return", "Change LCD", "PCB replacement", "Consumables replacement", "Electrical parts replacement"]
+        default = dfSelection["Repair Description"].unique()
+    )
+    dfSelection = dfSelection[dfSelection["Repair Description"].isin(repairDescription)]
+
+    repairWiseCalls = dfSelection.groupby(by=["Repair Description"]).size().reset_index(name="Count").sort_values(
+        by="Count",ascending=False)
+
+    n = min(7,len(repairDescription))
+    top_n = repairWiseCalls.head(n)
+
+    top_n["Color"] = colors[:len(top_n)]
+
+    total_count = repairWiseCalls["Count"].sum()
+
+    top_n["Percentage"] = (top_n["Count"] / total_count) * 100
+
+    top_n["PercentageLabel"] = top_n["Percentage"].apply(lambda x: f"{int(x)}%")
+
+    fig = px.bar(
+        top_n,
+        x="Count",
+        y="Repair Description",
+        orientation="h",
+        title="<b>Top 7 Repair Parts</b>" if n == 7 else "<b>Top Repair Parts</b>",
+        color="Color",
+        template="plotly_white",
+        text=top_n["PercentageLabel"],
+    )
+
+    fig.update_traces(
+        textfont=dict(size=16)
+    )
+
+    fig.update_layout(
+        showlegend=False,
+        xaxis_title=None,
+        yaxis_title=None,
+        plot_bgcolor="#E8EDF2",
+        xaxis=dict(showgrid=False, showticklabels=False),
+        yaxis=dict(showgrid=False),
+        autosize=True,
+        xaxis_tickfont_family="Arial",
+        xaxis_tickfont_size=12,
+        # xaxis_tickfont_color="black",
+        yaxis_tickfont_family="Arial",
+        yaxis_tickfont_size=12,
+        # yaxis_tickfont_color="black",
+    )
+    st.plotly_chart(fig)
+
+#-------------------------------------
+
+l,m = st.columns(2)
+
+with l:
+    subSymptomWise = dfSelection.groupby(by=["Symptom Group 2"]).size().reset_index(name="Count").sort_values(
+        by="Count",ascending=False)
+    n = min(7,len(subSymptomWise))
+    top_n = subSymptomWise.head(n)
+
+    top_n["Color"] = colors[:len(top_n):]
+    total_count = subSymptomWise["Count"].sum()
+    top_n["Percentage"] = (top_n["Count"] / total_count) * 100
+    top_n["PercentageLabel"] = top_n["Percentage"].apply(lambda x: f"{int(x)}%")
+
+    fig = px.bar(
+        top_n,
+        x="Count",
+        y="Symptom Group 2",
+        orientation="h",
+        title="<b>Top 7 Sub-Symptoms</b>" if n == 7 else "<b>Top Sub-Symptoms</b>",
+        color="Color",
+        template="plotly_white",
+        text=top_n["PercentageLabel"],
+    )
+
+    fig.update_traces(
+        textfont=dict(size=16)
+    )
+
+    fig.update_layout(
+        showlegend=False,
+        xaxis_title=None,
+        yaxis_title=None,
+        plot_bgcolor="#E8EDF2",
+        xaxis=dict(showgrid=False, showticklabels=False),
+        yaxis=dict(showgrid=False),
+        autosize=True,
+        xaxis_tickfont_family="Arial",
+        xaxis_tickfont_size=12,
+        # xaxis_tickfont_color="black",
+        yaxis_tickfont_family="Arial",
+        yaxis_tickfont_size=12,
+        # yaxis_tickfont_color="black",
+    )
+    st.plotly_chart(fig)
+
+#-------------------------------------
+
+l,m = st.columns(2)
+with l:
+    # poss_states = dfSelection["Region(Coverage)"].unique()
+    # st.write(poss_states)
+    stateWise = st.multiselect(
+        "Select State:",
+        # options=poss_states,
+        # default=poss_states,
+        options=dfSelection["Region(Coverage)"].unique(),
+        default=dfSelection["Region(Coverage)"].unique()
+        # default=["MAHARASHTRA", "GUJARAT", "KERALA", "ANDHRA PRADESH", "KARNATAKA"]
+    )
+    dfSelection = dfSelection[dfSelection["Region(Coverage)"].isin(stateWise)]
+
+
+    stateWiseCalls = dfSelection.groupby(by=["Region(Coverage)"]).size().reset_index(name="Count").sort_values(by="Count", ascending=False)
+    n = min(7,len(stateWiseCalls))
+    top_n = stateWiseCalls.head(n)
+
+    top_n["Color"] = colors[:len(top_n)]
+
+    total_count = stateWiseCalls["Count"].sum()
+
+    top_n["Percentage"] = (top_n["Count"] / total_count) * 100
+
+    top_n["PercentageLabel"] = top_n["Percentage"].apply(lambda x: f"{int(x)}%")
+
+    fig = px.bar(
+        top_n,
+        x="Region(Coverage)",
+        y="Count",
+        orientation="v",
+        title="<b>Top 7 States</b>" if n == 7 else "<b>Top States</b>",
+        color="Color",
+        template="plotly_white",
+        text=top_n["PercentageLabel"],
+    )
+
+    fig.update_traces(
+        textfont=dict(size=16)
+    )
+
+    fig.update_layout(
+        showlegend=False,
+        xaxis_title=None,
+        yaxis_title=None,
+        plot_bgcolor="#E8EDF2",
+        xaxis=dict(showgrid=False),
+        yaxis=dict(showgrid=False, showticklabels=False),
+        autosize=True,
+        xaxis_tickfont_family="Arial",
+        xaxis_tickfont_size=12,
+        # xaxis_tickfont_color="black",
+        yaxis_tickfont_family="Arial",
+        yaxis_tickfont_size=12,
+        # yaxis_tickfont_color="black",
+    )
+    st.plotly_chart(fig)
+with m:
+    locationWise = dfSelection.groupby(by=["Location"]).size().reset_index(name="Count").sort_values(
+        by="Count",ascending=False)
+    #n = 5
+    n = min(7,len(locationWise))
+    top_n = locationWise.head(n)
+    top_n["Color"] = colors[:len(top_n)]
+    total_count = locationWise["Count"].sum()
+
+    # total_records = len(dfSelection)
+    # top_n["Percentage"] = (top_n["Count"] / total_records) * 100
+    # total_unique_states = dfSelection["Region(Coverage)"].nunique()
+    # top_n["Percentage"] = (top_n["Count"] / total_unique_states) * 100
+    top_n["Percentage"] = (top_n["Count"] / total_count) * 100
+
+    top_n["PercentageLabel"] = top_n["Percentage"].apply(lambda x: f"{int(x)}%")
+
+    fig = px.bar(
+        top_n,
+        x="Count",
+        y="Location",
+        orientation="h",
+        title="<b>Top 7 Locations</b>" if n == 7 else "<b>Top Locations</b>",
+        color="Color",
+        template="plotly_white",
+        text=top_n["PercentageLabel"],  # Display x% on bars
+    )
+
+    fig.update_traces(
+        textfont=dict(size=16)
+    )
+
+    fig.update_layout(
+        showlegend=False,
+        xaxis_title=None,
+        yaxis_title=None,
+        plot_bgcolor="#E8EDF2",
+        xaxis=dict(showgrid=False,showticklabels=False),
+        yaxis=dict(showgrid=False),
+        autosize=True,
+        xaxis_tickfont_family="Arial",
+        xaxis_tickfont_size=12,
+        # xaxis_tickfont_color="black",
+        yaxis_tickfont_family="Arial",
+        yaxis_tickfont_size=12,
+        # yaxis_tickfont_color="black",
+    )
+    st.plotly_chart(fig)
+
+branchWise = dfSelection.groupby(by=["ASC Name"]).size().reset_index(name="Count").sort_values(by="Count", ascending=False)
+n=min(10,len(branchWise))
+top_n = branchWise.head(n)
+top_n["Color"] = colors[:len(top_n)]
+total_count = branchWise["Count"].sum()
+
+top_n["Percentage"] = (top_n["Count"] / total_count) * 100
+
+top_n["PercentageLabel"] = top_n["Percentage"].apply(lambda x: f"{int(x)}%")
+
+fig = px.bar(
+        top_n,
+        x="ASC Name",
+        y="Count",
+        orientation="v",
+        title="<b>Worst Branches</b>",
+        color="Color",
+        template="plotly_white",
+        text="Count"
+    )
+
+fig.update_traces(
+        textfont=dict(size=16)
+    )
+
+fig.update_layout(
+        showlegend=False,
+        xaxis_title=None,
+        yaxis_title=None,
+        plot_bgcolor="#E8EDF2",
+        xaxis=dict(showgrid=False),
+        yaxis=dict(showgrid=False, showticklabels=False),
+        autosize=True,
+        xaxis_tickfont_family="Arial",
+        xaxis_tickfont_size=12,
+        # xaxis_tickfont_color="black",
+        yaxis_tickfont_family="Arial",
+        yaxis_tickfont_size=12,
+        # yaxis_tickfont_color="black",
+    )
+st.plotly_chart(fig)
+
+#-------------------------------------
+
+st.write("Data")
+st.write(dfSelection[[
+       'Marketing Name','Svc Date',
+       'Symptom Group 1','Symptom Group 2', 'Handling Type',
+       'Symptom Description','Repair Description',
+       'Symptom Text (Manual Input)', 'Repair Text (Manual Input)',
+       'Progress Status', 'S/N', 'Symptom Code',
+       'Repair Code', 'ASC Code','Branch Office', 'Region',
+        'Region(Coverage)', 'Location', 'ASC Name']])
