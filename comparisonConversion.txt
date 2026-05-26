@@ -1,0 +1,29 @@
+Confidential			
+ - Sales : Overseas			
+ - KPI Type : By Symptom			
+ - Release date : 1~70			
+ - Ref. Model : 'S26U_O'			
+ - Target Model1 : 'S25U_O'			
+			
+Comparison Overiew			
+Item	Unit	"Ref. Model
+(Galaxy S26U)"	"Target Model1
+(Galaxy S25U)"
+Period	 Term	70Day	
+	 From	2026.03.11	2025.02.07
+	 To	2026.05.19	2025.04.17
+Sell In	(EA)	348,832	635,410
+		45%↓	
+Sell Out	(EA)	254,968	435,992
+		42%↓	
+Service	(Cnt)	662	1,200
+		45%↓	
+	(%)	0.26%	0.28%
+		7%↓	
+			
+covert to
+
+Item Unit S26U S25U  
+Period (same)
+Sellout Service   
+Improvement
