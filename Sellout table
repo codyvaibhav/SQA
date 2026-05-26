@@ -1,0 +1,43 @@
+import pandas as pd
+
+# ── 1. Raw data (mirrors df4 structure) ──────────────────────────────────────
+df4 = pd.DataFrame({
+    'Item':        ['Period','Period','Period','Sell In','Sell In','Sell Out','Sell Out','Service','Service','Service','Service'],
+    'Unit':        ['From','To','Term','(EA)','','(EA)','','(Cnt)','','(%)',''],
+    'Ref_S26U':    ['2026.03.11','2026.05.19','70Day',348832,'45%↓',254968,'42%↓',662,'45%↓','0.26%','7%↓'],
+    'Target_S25U': ['2025.02.07','2025.04.17','70Day',635410,'',435992,'',1200,'','0.28%',''],
+})
+
+# ── 2. Filter: keep only Period / Sell Out / Service rows ────────────────────
+keep_items = ['Period', 'Sell Out', 'Service']
+df_filtered = df4[df4['Item'].isin(keep_items)].copy()
+
+# ── 3. Drop arrow (↓) rows — keep only value rows ────────────────────────────
+df_filtered = df_filtered[df_filtered['Unit'] != ''].reset_index(drop=True)
+
+# ── 4. Rename columns ────────────────────────────────────────────────────────
+df_filtered.rename(columns={
+    'Ref_S26U':    'S26U',
+    'Target_S25U': 'S25U'
+}, inplace=True)
+
+# ── 5. Add Improvement column ─────────────────────────────────────────────────
+improvement_map = {
+    ('Sell Out', '(EA)'): '42%↓',
+    ('Service',  '(Cnt)'): '45%↓',
+    ('Service',  '(%)'): '7%↓',
+}
+df_filtered['Improvement'] = df_filtered.apply(
+    lambda r: improvement_map.get((r['Item'], r['Unit']), '-'), axis=1
+)
+
+# ── 6. Final column order ─────────────────────────────────────────────────────
+df_result = df_filtered[['Item', 'Unit', 'S26U', 'S25U', 'Improvement']]
+print(df_result.to_string(index=False))
+
+# ── 7. Export ─────────────────────────────────────────────────────────────────
+df_result.to_excel('output_kpi_comparison.xlsx', index=False)
+
+df_result.to_csv('output_kpi_comparison.csv',   index=False)
+
+print("\n✅ Exported: output_kpi_comparison.xlsx / .csv")
