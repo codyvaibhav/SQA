@@ -1,0 +1,505 @@
+"""
+Side-by-Side Symptom Comparison Dashboard
+==========================================
+Compares two Excel files (different models) across symptom groups,
+repair descriptions, and service date trends using Plotly.
+
+USAGE:
+    1. Set FILE_A and FILE_B to your actual file paths
+    2. Set the column name constants to match your headers
+    3. Run: python symptom_comparison.py
+"""
+
+import pandas as pd
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import plotly.express as px
+
+# ─────────────────────────────────────────────
+#  CONFIGURATION — Update these to match your files
+# ─────────────────────────────────────────────
+FILE_A = "model_a.xlsx"          # Path to first model's Excel file
+FILE_B = "model_b.xlsx"          # Path to second model's Excel file
+
+MODEL_A_NAME = "Model A"         # Display name for first model
+MODEL_B_NAME = "Model B"         # Display name for second model
+
+COL_SYMPTOM   = "symptom_group"       # Symptom group column name
+COL_REPAIR    = "repair_description"  # Repair description column name
+COL_DATE      = "service_date"        # Service date column name
+
+# Color palette
+COLOR_A = "#2563EB"   # Blue for Model A
+COLOR_B = "#DC2626"   # Red  for Model B
+
+# ─────────────────────────────────────────────
+#  1. LOAD DATA
+# ─────────────────────────────────────────────
+def load_data(file_a, file_b):
+    df_a = pd.read_excel(file_a)
+    df_b = pd.read_excel(file_b)
+
+    df_a["_model"] = MODEL_A_NAME
+    df_b["_model"] = MODEL_B_NAME
+
+    # Normalize column names (strip spaces, lowercase)
+    df_a.columns = df_a.columns.str.strip().str.lower().str.replace(" ", "_")
+    df_b.columns = df_b.columns.str.strip().str.lower().str.replace(" ", "_")
+
+    df = pd.concat([df_a, df_b], ignore_index=True)
+
+    # Parse service date
+    if COL_DATE in df.columns:
+        df[COL_DATE] = pd.to_datetime(df[COL_DATE], errors="coerce")
+        df["year_month"] = df[COL_DATE].dt.to_period("M").astype(str)
+
+    return df, df_a, df_b
+
+
+# ─────────────────────────────────────────────
+#  2. CHART 1 — Grouped Bar: Symptom Group Frequency
+# ─────────────────────────────────────────────
+def chart_symptom_frequency(df):
+    counts = (
+        df.groupby([COL_SYMPTOM, "_model"])
+        .size()
+        .reset_index(name="count")
+    )
+
+    fig = go.Figure()
+    for model, color in [(MODEL_A_NAME, COLOR_A), (MODEL_B_NAME, COLOR_B)]:
+        subset = counts[counts["_model"] == model]
+        fig.add_trace(go.Bar(
+            name=model,
+            x=subset[COL_SYMPTOM],
+            y=subset["count"],
+            marker_color=color,
+            text=subset["count"],
+            textposition="outside",
+        ))
+
+    fig.update_layout(
+        title="📊 Symptom Group Frequency — Side by Side",
+        xaxis_title="Symptom Group",
+        yaxis_title="Number of Cases",
+        barmode="group",
+        legend_title="Model",
+        xaxis_tickangle=-35,
+        template="plotly_white",
+        height=500,
+    )
+    return fig
+
+
+# ─────────────────────────────────────────────
+#  3. CHART 2 — Horizontal Bar: Top Repair Descriptions
+# ─────────────────────────────────────────────
+def chart_top_repairs(df, top_n=10):
+    fig = make_subplots(
+        rows=1, cols=2,
+        subplot_titles=(
+            f"Top {top_n} Repairs — {MODEL_A_NAME}",
+            f"Top {top_n} Repairs — {MODEL_B_NAME}"
+        ),
+        shared_xaxes=False,
+    )
+
+    for col_idx, (model, color) in enumerate(
+        [(MODEL_A_NAME, COLOR_A), (MODEL_B_NAME, COLOR_B)], start=1
+    ):
+        subset = (
+            df[df["_model"] == model][COL_REPAIR]
+            .value_counts()
+            .head(top_n)
+            .reset_index()
+        )
+        subset.columns = ["repair", "count"]
+        subset = subset.sort_values("count")  # ascending for horizontal bar
+
+        fig.add_trace(
+            go.Bar(
+                x=subset["count"],
+                y=subset["repair"],
+                orientation="h",
+                marker_color=color,
+                name=model,
+                text=subset["count"],
+                textposition="outside",
+                showlegend=(col_idx == 1),
+            ),
+            row=1, col=col_idx,
+        )
+
+    fig.update_layout(
+        title=f"🔧 Top {top_n} Repair Descriptions Comparison",
+        template="plotly_white",
+        height=500,
+        showlegend=True,
+    )
+    return fig
+
+
+# ─────────────────────────────────────────────
+#  4. CHART 3 — Line Chart: Symptom Trend Over Time
+# ─────────────────────────────────────────────
+def chart_time_trend(df):
+    if "year_month" not in df.columns:
+        print("⚠️  Skipping time trend — no valid service_date column found.")
+        return None
+
+    trend = (
+        df.groupby(["year_month", "_model"])
+        .size()
+        .reset_index(name="count")
+        .sort_values("year_month")
+    )
+
+    fig = go.Figure()
+    for model, color in [(MODEL_A_NAME, COLOR_A), (MODEL_B_NAME, COLOR_B)]:
+        subset = trend[trend["_model"] == model]
+        fig.add_trace(go.Scatter(
+            x=subset["year_month"],
+            y=subset["count"],
+            mode="lines+markers",
+            name=model,
+            line=dict(color=color, width=2),
+            marker=dict(size=6),
+        ))
+
+    fig.update_layout(
+        title="📅 Service Cases Over Time",
+        xaxis_title="Month",
+        yaxis_title="Number of Cases",
+        legend_title="Model",
+        template="plotly_white",
+        height=450,
+        xaxis_tickangle=-35,
+    )
+    return fig
+
+
+# ─────────────────────────────────────────────
+#  5. CHART 4 — Heatmap: Symptom vs Repair
+# ─────────────────────────────────────────────
+def chart_heatmap(df, model_name, top_symptoms=10, top_repairs=10):
+    subset = df[df["_model"] == model_name]
+
+    top_s = subset[COL_SYMPTOM].value_counts().head(top_symptoms).index.tolist()
+    top_r = subset[COL_REPAIR].value_counts().head(top_repairs).index.tolist()
+
+    heat_data = (
+        subset[subset[COL_SYMPTOM].isin(top_s) & subset[COL_REPAIR].isin(top_r)]
+        .groupby([COL_SYMPTOM, COL_REPAIR])
+        .size()
+        .unstack(fill_value=0)
+    )
+
+    fig = go.Figure(go.Heatmap(
+        z=heat_data.values,
+        x=heat_data.columns.tolist(),
+        y=heat_data.index.tolist(),
+        colorscale="Blues" if model_name == MODEL_A_NAME else "Reds",
+        text=heat_data.values,
+        texttemplate="%{text}",
+    ))
+
+    fig.update_layout(
+        title=f"🗺️  Symptom × Repair Heatmap — {model_name}",
+        xaxis_title="Repair Description",
+        yaxis_title="Symptom Group",
+        xaxis_tickangle=-35,
+        template="plotly_white",
+        height=500,
+    )
+    return fig
+
+
+# ─────────────────────────────────────────────
+#  6. CHART 5 — Pie / Donut: Symptom Share
+# ─────────────────────────────────────────────
+def chart_symptom_share(df):
+    fig = make_subplots(
+        rows=1, cols=2,
+        specs=[[{"type": "domain"}, {"type": "domain"}]],
+        subplot_titles=(MODEL_A_NAME, MODEL_B_NAME),
+    )
+
+    for col_idx, model in enumerate([MODEL_A_NAME, MODEL_B_NAME], start=1):
+        subset = df[df["_model"] == model][COL_SYMPTOM].value_counts()
+        fig.add_trace(
+            go.Pie(
+                labels=subset.index,
+                values=subset.values,
+                hole=0.4,
+                name=model,
+            ),
+            row=1, col=col_idx,
+        )
+
+    fig.update_layout(
+        title="🥧 Symptom Group Share",
+        template="plotly_white",
+        height=450,
+    )
+    return fig
+
+
+# ─────────────────────────────────────────────
+#  7. SUMMARY STATS TABLE
+# ─────────────────────────────────────────────
+def print_summary(df):
+    print("\n" + "=" * 55)
+    print("  SUMMARY STATISTICS")
+    print("=" * 55)
+    for model in [MODEL_A_NAME, MODEL_B_NAME]:
+        sub = df[df["_model"] == model]
+        print(f"\n  {model}:")
+        print(f"    Total records      : {len(sub)}")
+        print(f"    Unique symptoms    : {sub[COL_SYMPTOM].nunique()}")
+        print(f"    Unique repairs     : {sub[COL_REPAIR].nunique()}")
+        if COL_DATE in sub.columns:
+            print(f"    Date range         : {sub[COL_DATE].min().date()} → {sub[COL_DATE].max().date()}")
+        top_sym = sub[COL_SYMPTOM].value_counts().idxmax()
+        print(f"    Most common symptom: {top_sym}")
+    print("=" * 55 + "\n")
+
+
+# ─────────────────────────────────────────────
+#  MAIN — Run all charts
+# ─────────────────────────────────────────────
+if __name__ == "__main__":
+    print("Loading data...")
+    df, df_a, df_b = load_data(FILE_A, FILE_B)
+
+    print_summary(df)
+
+    print("Generating charts...")
+
+    chart_symptom_frequency(df).show()
+    chart_top_repairs(df).show()
+
+    time_fig = chart_time_trend(df)
+    if time_fig:
+        time_fig.show()
+
+    chart_heatmap(df, MODEL_A_NAME).show()
+    chart_heatmap(df, MODEL_B_NAME).show()
+    chart_symptom_share(df).show()
+
+    print("✅ All charts displayed successfully.")
+
+
+WEEKLY SYMPTOM TREND
+
+"""
+Weekly Symptom Trend — Line Graph
+===================================
+- Parses service_date from INT64 YYMMDD format (e.g. 260311 → 2026-03-11)
+- Groups by ISO week number → "WK 11", "WK 12" ...
+- Plots top 5 symptoms as separate lines
+- Side-by-side subplots: Model A (left) | Model B (right)
+
+USAGE:
+    pip install pandas plotly openpyxl
+    python weekly_symptom_trend.py
+"""
+
+import pandas as pd
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+# ─────────────────────────────────────────────
+#  CONFIGURATION
+# ─────────────────────────────────────────────
+FILE_A       = "model_a.xlsx"
+FILE_B       = "model_b.xlsx"
+MODEL_A_NAME = "Model A"
+MODEL_B_NAME = "Model B"
+
+COL_SYMPTOM  = "symptom_group"   # symptom group column
+COL_DATE     = "service_date"    # int64 YYMMDD column e.g. 260311
+
+TOP_N        = 5                 # number of top symptoms to show
+
+# Line colors for up to 5 symptoms (shared across both models)
+SYMPTOM_COLORS = ["#2563EB", "#DC2626", "#16A34A", "#D97706", "#7C3AED"]
+
+
+# ─────────────────────────────────────────────
+#  1. PARSE YYMMDD INT64 → datetime
+# ─────────────────────────────────────────────
+def parse_yymmdd(series: pd.Series) -> pd.Series:
+    """
+    Convert int64 YYMMDD (e.g. 260311) to datetime (2026-03-11).
+    Assumes YY >= 00 maps to 2000+YY.
+    """
+    s = series.astype(str).str.zfill(6)   # ensure 6 digits
+    return pd.to_datetime("20" + s, format="%Y%m%d", errors="coerce")
+
+
+# ─────────────────────────────────────────────
+#  2. LOAD & PREPARE
+# ─────────────────────────────────────────────
+def load_and_prepare(filepath, model_name):
+    df = pd.read_excel(filepath)
+
+    # Normalize headers
+    df.columns = df.columns.str.strip().str.lower().str.replace(" ", "_")
+
+    # Parse date
+    df[COL_DATE] = parse_yymmdd(df[COL_DATE])
+
+    # Drop rows with invalid date or missing symptom
+    df = df.dropna(subset=[COL_DATE, COL_SYMPTOM])
+
+    # ISO week number + week-start Monday label
+    df["week_num"]   = df[COL_DATE].dt.isocalendar().week.astype(int)
+    df["year"]       = df[COL_DATE].dt.isocalendar().year.astype(int)
+    df["week_start"] = df[COL_DATE] - pd.to_timedelta(
+                           df[COL_DATE].dt.weekday, unit="D"
+                       )  # Monday of that week
+    df["week_label"] = "WK " + df["week_num"].astype(str) + \
+                       " (" + df["week_start"].dt.strftime("%-d %b") + ")"
+
+    # Stable sort key for x-axis ordering
+    df["week_sort"]  = df["year"] * 100 + df["week_num"]
+
+    df["_model"] = model_name
+    return df
+
+
+# ─────────────────────────────────────────────
+#  3. GET TOP-N GLOBAL SYMPTOMS
+#     (shared across both models for consistent legend)
+# ─────────────────────────────────────────────
+def get_top_symptoms(df_a, df_b, top_n=TOP_N):
+    combined = pd.concat([df_a, df_b])
+    top = (
+        combined[COL_SYMPTOM]
+        .value_counts()
+        .head(top_n)
+        .index
+        .tolist()
+    )
+    return top
+
+
+# ─────────────────────────────────────────────
+#  4. AGGREGATE: weekly count per symptom
+# ─────────────────────────────────────────────
+def weekly_counts(df, top_symptoms):
+    df_filtered = df[df[COL_SYMPTOM].isin(top_symptoms)]
+
+    # Count per (week_sort, week_label, symptom)
+    agg = (
+        df_filtered
+        .groupby(["week_sort", "week_label", COL_SYMPTOM])
+        .size()
+        .reset_index(name="count")
+        .sort_values("week_sort")
+    )
+    return agg
+
+
+# ─────────────────────────────────────────────
+#  5. BUILD CHART
+# ─────────────────────────────────────────────
+def build_chart(df_a, df_b, top_symptoms):
+    agg_a = weekly_counts(df_a, top_symptoms)
+    agg_b = weekly_counts(df_b, top_symptoms)
+
+    # Ordered week labels for x-axis
+    weeks_a = agg_a[["week_sort", "week_label"]].drop_duplicates().sort_values("week_sort")
+    weeks_b = agg_b[["week_sort", "week_label"]].drop_duplicates().sort_values("week_sort")
+
+    fig = make_subplots(
+        rows=1, cols=2,
+        subplot_titles=(
+            f"📈 {MODEL_A_NAME} — Weekly Symptom Trend",
+            f"📈 {MODEL_B_NAME} — Weekly Symptom Trend",
+        ),
+        shared_yaxes=True,
+        horizontal_spacing=0.08,
+    )
+
+    for idx, (symptom, color) in enumerate(zip(top_symptoms, SYMPTOM_COLORS)):
+        for col_idx, (agg, weeks, model_name) in enumerate(
+            [(agg_a, weeks_a, MODEL_A_NAME),
+             (agg_b, weeks_b, MODEL_B_NAME)],
+            start=1,
+        ):
+            sym_data = agg[agg[COL_SYMPTOM] == symptom]
+
+            # Reindex to all weeks (fill 0 for weeks with no cases)
+            sym_data = (
+                weeks.merge(sym_data, on=["week_sort", "week_label"], how="left")
+                     .fillna({"count": 0})
+            )
+
+            fig.add_trace(
+                go.Scatter(
+                    x=sym_data["week_label"],
+                    y=sym_data["count"],
+                    mode="lines+markers",
+                    name=symptom,
+                    legendgroup=symptom,           # shared legend entry
+                    showlegend=(col_idx == 1),     # show once in legend
+                    line=dict(color=color, width=2.5),
+                    marker=dict(size=7, symbol="circle"),
+                    hovertemplate=(
+                        f"<b>{symptom}</b><br>"
+                        "Week: %{x}<br>"
+                        "Count: %{y}<extra></extra>"
+                    ),
+                ),
+                row=1, col=col_idx,
+            )
+
+    fig.update_layout(
+        title=dict(
+            text=f"Top {TOP_N} Symptoms — Weekly Count Comparison",
+            font=dict(size=18),
+            x=0.5,
+        ),
+        legend=dict(
+            title="Symptom Group",
+            orientation="v",
+            x=1.02, y=1,
+        ),
+        template="plotly_white",
+        height=520,
+        hovermode="x unified",
+    )
+
+    # X-axis styling for both subplots
+    for col_idx in [1, 2]:
+        fig.update_xaxes(
+            title_text="Service Week",
+            tickangle=-35,
+            row=1, col=col_idx,
+        )
+
+    fig.update_yaxes(title_text="Count of Symptoms", row=1, col=1)
+
+    return fig
+
+
+# ─────────────────────────────────────────────
+#  MAIN
+# ─────────────────────────────────────────────
+if __name__ == "__main__":
+    print("Loading files...")
+    df_a = load_and_prepare(FILE_A, MODEL_A_NAME)
+    df_b = load_and_prepare(FILE_B, MODEL_B_NAME)
+
+    print("Identifying top symptoms...")
+    top_symptoms = get_top_symptoms(df_a, df_b, TOP_N)
+    print(f"  Top {TOP_N}: {top_symptoms}")
+
+    print("Building chart...")
+    fig = build_chart(df_a, df_b, top_symptoms)
+    fig.show()
+
+    print("✅ Done.")
+
+
